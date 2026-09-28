@@ -94,7 +94,7 @@ GitHub Actions 每天自动运行一次：
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `SERVER_ID` | LAST RENEW ID  | `10102` |
+| `SERVER_ID` | (必须改成自己的）F12找lastrenew?id=  | `10102` |
 | `RENEW_HOURS` | 续期阈值小时数（剩余时间 ≤ 此值才续期） | `24` |
 | `RENEW_THRESHOLD` | 续期最低余额（币） | `50` |
 | `KEEP_RUNS` | 额外保留的历史运行记录条数 | `0` |
