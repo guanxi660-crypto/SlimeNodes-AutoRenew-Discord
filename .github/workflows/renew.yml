@@ -1,0 +1,105 @@
+name: SlimeNodes Auto Renew
+
+on:
+  schedule:
+    # 每天一次：12:30 UTC（北京时间 20:30）
+  - cron: '30 12 * * *'
+  workflow_dispatch:
+
+# actions: write 用于运行结束后清理历史运行记录；contents: read 供 checkout 使用
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  renew-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run auto renew
+        env:
+          # 敏感项走 Secrets
+          SLIME_SESSION: ${{ secrets.SLIME_SESSION }}
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          # 非敏感项走 Variables（Settings → Secrets and variables → Actions → Variables）
+          SERVER_ID: ${{ vars.SERVER_ID }}
+          RENEW_HOURS: ${{ vars.RENEW_HOURS }}
+          RENEW_THRESHOLD: ${{ vars.RENEW_THRESHOLD }}
+          # 面板若更换 Discord 应用，可用下面两个 Variable 覆盖
+          DISCORD_CLIENT_ID: ${{ vars.DISCORD_CLIENT_ID }}
+          DISCORD_REDIRECT_URI: ${{ vars.DISCORD_REDIRECT_URI }}
+        run: python renew.py
+
+  # 本次运行结束后清理本工作流的历史运行记录，只保留最新一份（当前这次）
+  cleanup-runs:
+    needs: renew-server
+    if: always()
+    runs-on: ubuntu-latest
+    # 清理失败不影响续期结果
+    continue-on-error: true
+    steps:
+      - name: Delete old workflow runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          # 额外保留的最近已完成运行条数（仓库 Variable，未配置时默认 0 = 只保留当前这次）
+          KEEP_RUNS: ${{ vars.KEEP_RUNS }}
+        run: |
+          set -uo pipefail
+
+          WF_FILE="${WORKFLOW_REF%%@*}"   # owner/repo/.github/workflows/renew.yml
+          WF_FILE="${WF_FILE##*/}"        # renew.yml
+          KEEP="${KEEP_RUNS:-0}"
+          case "$KEEP" in ''|*[!0-9]*) KEEP=0 ;; esac
+
+          echo "仓库: $REPO | 工作流: $WF_FILE | 当前运行: $CURRENT_RUN_ID | 额外保留: $KEEP"
+
+          API="https://api.github.com/repos/$REPO"
+          HDR=(-H "Authorization: Bearer $GH_TOKEN"
+               -H "Accept: application/vnd.github+json"
+               -H "X-GitHub-Api-Version: 2022-11-28")
+
+          # 1) 分页拉取所有「已结束」的运行记录（按创建时间倒序，最新在前）
+          #    只取 completed，正在进行的运行不受影响；当前这次运行也未结束，天然被排除
+          ids=""
+          for page in $(seq 1 50); do
+            resp=$(curl -sS "${HDR[@]}" \
+              "$API/actions/workflows/$WF_FILE/runs?per_page=100&status=completed&page=$page")
+            count=$(echo "$resp" | jq '.workflow_runs | length' 2>/dev/null || echo 0)
+            [ -z "$count" ] && count=0
+            [ "$count" -eq 0 ] && break
+            ids="$ids $(echo "$resp" | jq -r --arg cur "$CURRENT_RUN_ID" \
+              '.workflow_runs[]? | select((.id|tostring) != $cur) | .id')"
+            [ "$count" -lt 100 ] && break
+          done
+
+          total=$(echo $ids | wc -w)
+          echo "找到 $total 条历史运行记录"
+
+          # 2) 保留最新 KEEP 条，其余全部删除
+          kept=0
+          deleted=0
+          failed=0
+          for id in $ids; do
+            if [ "$kept" -lt "$KEEP" ]; then
+              kept=$((kept + 1))
+              echo "↩️ 保留 run $id"
+              continue
+            fi
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE "${HDR[@]}" \
+              "$API/actions/runs/$id")
+            if [ "$code" = "204" ]; then
+              deleted=$((deleted + 1))
+              echo "🗑️ 已删除 run $id"
+            else
+              failed=$((failed + 1))
+              echo "⚠️ 删除 run $id 失败 (HTTP $code)"
+            fi
+          done
+
+          echo "✅ 清理完成：删除 $deleted 条，保留 $kept 条已完成记录 + 当前这次运行（失败 $failed 条）"
