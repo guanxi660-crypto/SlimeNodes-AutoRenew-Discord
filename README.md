@@ -3,12 +3,7 @@
 **只续期、不刷币** 的 [SlimeNodes](https://dash.slimenodes.com) 服务器自动续期脚本，
 支持 **Discord Token 关联登录**（Session 失效自动重新登录，免手动换 cookie）。
 
-> 改装自 [guanxi660-crypto/SlimeNodes-AutoRenew](https://github.com/guanxi660-crypto/SlimeNodes-AutoRenew)。
-> 本版在原版「Session Cookie 单登录」基础上，参考
-> [guanxi660-crypto/Auto-Renew-Bothosting](https://github.com/guanxi660-crypto/Auto-Renew-Bothosting)
-> 的 Discord OAuth 思路，新增 Discord Token 备用登录 + Secret 自动回写。
->
-> **与原版最大的不同：全程纯 HTTP（curl），不需要浏览器。**
+> **全程纯 HTTP（curl），不需要浏览器。**
 > SlimeNodes 的 `/login` 直接 302 到 Discord 且不带 `state`、不预设 cookie，
 > 因此整条 OAuth 链路可以用 curl 走完，无需 seleniumbase / chromedriver / Xvfb / Turnstile。
 
@@ -186,9 +181,3 @@ python tests/test_flow.py
 ```bash
 python tests/probe_live_login.py
 ```
-
-## 参考
-
-- [guanxi660-crypto/SlimeNodes-AutoRenew](https://github.com/guanxi660-crypto/SlimeNodes-AutoRenew) — 本仓库改装前的原版
-- [guanxi660-crypto/Auto-Renew-Bothosting](https://github.com/guanxi660-crypto/Auto-Renew-Bothosting) — Discord Token OAuth 登录思路来源
-- [jpus/SlimeNodes-AutoCoin](https://github.com/jpus/SlimeNodes-AutoCoin) — 更早的原始参考脚本
