@@ -25,7 +25,7 @@
 | ② 备用路 | ① 失败 + 配了 `DISCORD_TOKEN` | 纯 HTTP 走 Discord OAuth 换新 `connect.sid` |
 | ③ 回写路 | ② 成功 + 配了 `GH_TOKEN` | `gh secret set SLIME_SESSION` 回写，下次走快路径 |
 
-备用路的三个 HTTP 步骤：
+备用路的四个 HTTP 步骤：
 
 ```
 GET  https://dash.slimenodes.com/login
@@ -37,9 +37,21 @@ POST https://discord.com/api/v9/oauth2/authorize?<同上 query>
      → 200 {"location": "https://dash.slimenodes.com/callback?code=..."}
 
 GET  https://dash.slimenodes.com/callback?code=...
+     → 200 中间页，正文只有一段脚本：
+       window.location.replace('/submitlogin?code=...')
+       ⚠️ 浏览器会自动跳，curl 不执行 JS —— 必须手动跟进下一步，否则拿不到 session
+
+GET  https://dash.slimenodes.com/submitlogin?code=...
      (curl cookie jar)
      → Set-Cookie: connect.sid=... ; 302 /dashboard   ← 登录完成
 ```
+
+> ⚠️ **踩过的坑**：SlimeNodes 的 `/callback` 不直接发 session，只返回一个靠 JS 跳转的中间页，
+> 真正登录在 `/submitlogin`。早期版本止步于 `/callback`，表现为
+> 「Discord 授权通过 → 回调落地 → ❌ 回调成功但未拿到 connect.sid cookie」，
+> 容易误判成 Discord Token 无效（实际 Token 完全正常）。
+> 脚本现在会先取中间页 HTML、正则提取 `/submitlogin` 链接再跟进；
+> 提取不到时按 `/callback → /submitlogin` 路径替换兜底。
 
 > 💡 SlimeNodes 的 OAuth 是**无 state** 的，所以不需要像 bot-hosting 那样先用浏览器抓 state，
 > 纯 curl 即可闭环。若面板日后改成带 state，需要补一步「先请求授权页、从 URL 里取 state」。

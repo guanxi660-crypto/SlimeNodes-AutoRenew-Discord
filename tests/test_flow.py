@@ -2,7 +2,9 @@
 """SlimeNodes 续期脚本本地端到端测试。
 
 起两个模拟服务：
-  * 面板服务（模拟 dash.slimenodes.com）—— /login /callback /dashboard /lastrenew /renew
+  * 面板服务（模拟 dash.slimenodes.com）—— /login /callback /submitlogin /dashboard /lastrenew /renew
+    注意 /callback 忠实复现真实面板行为：返回 200 + JS 中间页（window.location.replace('/submitlogin?...')），
+    真正下发 connect.sid 的是 /submitlogin。curl 不执行 JS，脚本必须自己跟进。
   * Discord 服务（模拟 discord.com）   —— /api/oauth2/authorize /api/v9/oauth2/authorize
 
 之所以拆成两个端口，是为了忠实复现「会话失效时 curl -L 会被甩到异域 Discord 页」
@@ -89,6 +91,15 @@ class PanelHandler(Base):
             return self._redirect(url)
 
         if p == "/callback":
+            # 真实面板行为：只返回一个靠 JS 跳转的中间页，
+            # 真正处理登录的是 /submitlogin（curl 不执行 JS，脚本必须自己跟进）
+            code = q.get("code", [""])[0]
+            html = ("<html><body><script>"
+                    f"window.location.replace('/submitlogin?code={code}')"
+                    "</script></body></html>")
+            return self._send(200, html)
+
+        if p == "/submitlogin":
             if q.get("code", [""])[0] == "MOCKCODE":
                 # HttpOnly 用于验证 jar 解析能剥掉 #HttpOnly_ 前缀
                 return self._redirect("/dashboard", [

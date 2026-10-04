@@ -19,8 +19,11 @@
                  → 302 到 discord.com/api/oauth2/authorize（SlimeNodes 不带 state）
             POST discord.com/api/v9/oauth2/authorize  (Authorization: <DISCORD_TOKEN>)
                  → 返回 location = {BASE}/callback?code=...
-            GET  /callback?code=...  (带 cookie jar)
-                 → 面板下发 connect.sid，登录完成
+            GET  /callback?code=...      (带 cookie jar)
+                 → 200 中间页，页面只有一段 JS：window.location.replace('/submitlogin?code=...')
+                   （curl 不执行 JS，必须手动跟进，否则永远拿不到 session）
+            GET  /submitlogin?code=...   (带 cookie jar)
+                 → 302 /dashboard + Set-Cookie: connect.sid，登录完成
   回写路：拿到新 session 且配置了 GH_TOKEN → 用 gh CLI 回写 SLIME_SESSION Secret
 
 纯 HTTP 方式，无需浏览器（无需 seleniumbase / chromedriver / Turnstile）。
@@ -327,6 +330,38 @@ def _discord_exchange(authorize_url):
     return location
 
 
+def _finish_panel_login(location):
+    """走完面板回调：/callback 只是 JS 中间页，真正登录在 /submitlogin。
+
+    面板 /callback?code=... 返回 200，正文只有一段脚本：
+        window.location.replace('/submitlogin?code=...')
+    浏览器会自动跳转，curl 不会执行 JS，所以必须手动提取并跟进 /submitlogin，
+    由它下发 connect.sid。返回跟随后的最终 URL（失败返回空串）。
+    """
+    # 1) 先取中间页 HTML，从中提取 /submitlogin 链接
+    body = run_curl(["-H", f"User-Agent: {UA}", "-c", JAR, "-b", JAR, location],
+                    timeout=25)
+    m = re.search(r"""['"](/submitlogin\?[^'"]*)['"]""", body)
+    if m:
+        submit_url = BASE.rstrip("/") + m.group(1)
+    else:
+        # 2) 兜底：面板若换了中间页写法，按 /callback → /submitlogin 路径替换
+        p = urlparse(location)
+        if p.netloc != urlparse(BASE).netloc or not p.path.rstrip("/").endswith("/callback"):
+            er(f"无法从回调页解析登录地址: {location[:120]}")
+            return ""
+        submit_url = f"{BASE.rstrip('/')}/submitlogin?{p.query}"
+        log(f"⚠️ 未从中间页提取到 /submitlogin，按路径替换兜底: {submit_url[:120]}")
+    log(f"面板登录端点: {submit_url[:120]}")
+
+    # 3) 请求 /submitlogin，跟随 302；Set-Cookie 会被 curl 写进 jar
+    final_url = run_curl(["-L", "-o", NUL, "-w", "%{url_effective}",
+                          "-H", f"User-Agent: {UA}",
+                          "-c", JAR, "-b", JAR, submit_url], timeout=25).strip()
+    log(f"回调落地: {final_url[:120]}")
+    return final_url
+
+
 def discord_login():
     """纯 HTTP 走完 Discord OAuth，把新 connect.sid 收进 cookie jar。成功返回 session 值。"""
     global _LOGIN_METHOD
@@ -339,11 +374,9 @@ def discord_login():
     if not location:
         return ""
 
-    # 跟随回调，面板会 Set-Cookie: connect.sid
-    final_url = run_curl(["-L", "-o", NUL, "-w", "%{url_effective}",
-                          "-H", f"User-Agent: {UA}",
-                          "-c", JAR, "-b", JAR, location], timeout=25).strip()
-    log(f"回调落地: {final_url[:120]}")
+    final_url = _finish_panel_login(location)
+    if not final_url:
+        return ""
     if "error=" in final_url:
         er(f"回调返回错误: {final_url[:160]}")
         return ""
