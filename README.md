@@ -11,6 +11,7 @@
 
 - 🔄 **自动续期** — 服务器到期前 ≤ `RENEW_HOURS`（默认 24h）且余额 ≥ `RENEW_THRESHOLD`（默认 50 币）时自动调用 `/renew` 续期
 - 🔑 **Discord Token 关联登录** — `SLIME_SESSION` 失效或未配置时，用 Discord Token 走 OAuth 自动换取新的 `connect.sid`
+- 👤 **账号自动识别** — 从面板 dashboard 读取当前登录账号（Heliactyl 的 `navbar-profile-name`），通知里显示真实账号的脱敏值，不再写死占位
 - ♻️ **Secret 自动回写** — 配了 `GH_TOKEN` 时，新 session 自动写回 `SLIME_SESSION` Secret，下次运行直接走快路径
 - 📱 **TG 通知** — 每次运行后发送状态通知到 Telegram（可选）
 - ⚠️ **余额不足提醒** — 余额不够续期时在通知中明确提示
@@ -149,13 +150,17 @@ GitHub Actions 每天自动运行一次：
 
 ✅ 续期成功
 ⏱️ 新过期时间: 6j 23h
-👤 登录账户: b****b
+👤 登录账户: 8****d
 🔐 登录方式: DISCORD_TOKEN
 ⏱️ 运行时间: 2026-09-06 05:00:28
 ```
 
 过期时间用 `Xj Xh`（天+小时）原样展示；账号首尾各留 1 字符脱敏；
 `🔐 登录方式` 仅在**非** session 直连时出现（即本次是 Discord 登录）。
+
+> 👤 **登录账户来自面板自动识别**（dashboard 导航栏的 `navbar-profile-name`），
+> 复用 `get_balance()` 已抓取的页面，不额外发请求。识别不到时（登录失败、面板改版）
+> 显示「未识别」；如需强制指定，可设置环境变量 `ACCOUNT_LABEL` 覆盖。
 
 状态行有五种：
 - `✅ 续期成功`（同时显示续期后的新过期时间）

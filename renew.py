@@ -48,7 +48,9 @@ DISCORD_TOKEN = _raw_dc.split(",", 1)[-1].strip() if _raw_dc else ""
 # 新增：GitHub PAT(classic)，用于自动回写 SLIME_SESSION Secret（可选）
 GH_TOKEN = os.environ.get("GH_TOKEN") or ""
 
-ACCOUNT_LABEL = os.environ.get("ACCOUNT_LABEL") or "btpphlmb"
+# 账号名默认从面板 dashboard 自动识别（Heliactyl 系面板的 navbar-profile-name）；
+# 该环境变量仅在需要强制覆盖时使用。
+ACCOUNT_LABEL = os.environ.get("ACCOUNT_LABEL") or ""
 SERVER_ID = os.environ.get("SERVER_ID") or "10102"
 # 续期最低余额（币）
 RENEW_THRESHOLD = int(os.environ.get("RENEW_THRESHOLD") or "50")
@@ -77,7 +79,8 @@ JAR = os.path.join(os.environ.get("TEMP") or os.environ.get("TMPDIR") or "/tmp",
                    "slime_cookies.txt")
 
 # 运行时 cookie 状态：优先 jar（Discord 登录后），否则用显式 cookie 头
-_STATE = {"session": "", "use_jar": False}
+# dashboard_html 由 get_balance() 顺手缓存，供账号识别复用（避免额外请求）
+_STATE = {"session": "", "use_jar": False, "dashboard_html": ""}
 # 本次实际使用的登录方式（用于通知）
 _LOGIN_METHOD = "SESSION_TOKEN"
 
@@ -138,6 +141,21 @@ def mask_account(label):
     return local[0] + "****" + local[-1] + ("@" + domain if domain else "")
 
 
+def get_account_label():
+    """识别当前登录账号。
+
+    面板（Heliactyl 系）在 dashboard 导航栏渲染：
+        <p class="... navbar-profile-name">用户名</p>
+    该 HTML 由 get_balance() 顺手缓存，因此不额外发请求。
+    识别不到时回退到 ACCOUNT_LABEL 环境变量；再没有则返回空串。
+    """
+    html = _STATE.get("dashboard_html") or ""
+    m = re.search(r'navbar-profile-name[^>]*>([^<]+)<', html)
+    if m and m.group(1).strip():
+        return m.group(1).strip()
+    return ACCOUNT_LABEL
+
+
 def fmt_remaining(hours):
     """剩余小时数 → '4j 9h' 格式（j=天 h=小时），不足 1 天只显示小时，不做小数天换算"""
     if hours is None or hours < 0:
@@ -158,7 +176,8 @@ def notify(status, extra="", expiry_hours=None, renewed=False):
         lines.append(f"⏱️ {'新过期时间' if renewed else '过期时间'}: {fmt_remaining(expiry_hours)}")
     if extra:
         lines.append(extra)
-    lines.append(f"👤 登录账户: {mask_account(ACCOUNT_LABEL)}")
+    acct = get_account_label()
+    lines.append(f"👤 登录账户: {mask_account(acct) if acct else '未识别'}")
     if _LOGIN_METHOD != "SESSION_TOKEN":
         lines.append(f"🔐 登录方式: {_LOGIN_METHOD}")
     lines.append(f"⏱️ 运行时间: {now_local()}")
@@ -202,6 +221,7 @@ def get_balance():
     final_url = lines[-1] if lines else ""
     m = re.search(r'balance\.textContent\s*=\s*Math\.floor\((\d+)\s*\*\s*100\)', body)
     if m:
+        _STATE["dashboard_html"] = body   # 供账号识别复用，不额外发请求
         return int(m.group(1)), False
     if looks_logged_out(final_url, body):
         return None, True
@@ -418,7 +438,6 @@ def update_github_secret(secret_name, value):
 # ---------------------------------------------------------------- 主流程
 def main():
     log(f"\n{'='*44}\n  SlimeNodes 自动续期 (Discord 关联登录)\n{'='*44}")
-    log(f"账号: {ACCOUNT_LABEL}")
 
     if not SLIME_SESSION and not DISCORD_TOKEN:
         er("SLIME_SESSION 与 DISCORD_TOKEN 均未设置，无法登录")
@@ -472,6 +491,9 @@ def main():
 
         # 回写 Secret，下次直接走快路径
         update_github_secret("SLIME_SESSION", new_session)
+
+    # 会话已建立，此时可识别真实账号
+    log(f"账号: {get_account_label() or '(未识别)'}")
 
     # ---- 2. 查剩余时间
     hl = get_hours_left()

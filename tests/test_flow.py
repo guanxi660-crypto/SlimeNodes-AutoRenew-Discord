@@ -39,7 +39,9 @@ SCOPE = "identify email guilds.join"
 STATE = {"panel": "", "discord": "", "discord_calls": 0, "renew_calls": 0,
          "balance_calls": 0}
 
+MOCK_USERNAME = "MockUser"      # 面板 dashboard 里渲染的账号名（脱敏后应为 M****r）
 DASHBOARD_HTML = f"""<html><body>
+<p class="mb-0 d-none d-sm-block navbar-profile-name">{MOCK_USERNAME}</p>
 <div id="balance"></div>
 <script>balance.textContent = Math.floor({BALANCE} * 100);</script>
 </body></html>"""
@@ -214,7 +216,7 @@ def main():
         "A. SLIME_SESSION 有效（快路径，不应访问 Discord）",
         {"SLIME_SESSION": VALID_SID, "DISCORD_TOKEN": GOOD_TOKEN},
         expect_exit=0, expect_discord_calls=0, expect_renew=True,
-        expect_log=("SESSION_TOKEN 有效", "Server renewed!"),
+        expect_log=("SESSION_TOKEN 有效", "Server renewed!", "M****r"),
     ))
 
     results.append(run_case(
@@ -236,7 +238,7 @@ def main():
         "D. 无 SLIME_SESSION + 有效 Discord Token → 纯 Discord 登录",
         {"DISCORD_TOKEN": GOOD_TOKEN},
         expect_exit=0, expect_discord_calls=1, expect_renew=True,
-        expect_log=("Discord 登录成功", "Server renewed!"),
+        expect_log=("Discord 登录成功", "Server renewed!", "M****r"),
     ))
 
     srv_panel.shutdown()
