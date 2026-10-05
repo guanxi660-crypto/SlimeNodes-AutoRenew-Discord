@@ -13,9 +13,11 @@ permissions:
 
 jobs:
   renew-server:
-    runs-on: ubuntu-latest
+    # 固定到 ubuntu-24.04 而不是 ubuntu-latest：
+    # latest 将于 2026-10-19 迁移到 Ubuntu 26，固定标签可避免迁移期行为漂移
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Run auto renew
         env:
           # 敏感项走 Secrets
@@ -31,13 +33,30 @@ jobs:
           # 面板若更换 Discord 应用，可用下面两个 Variable 覆盖
           DISCORD_CLIENT_ID: ${{ vars.DISCORD_CLIENT_ID }}
           DISCORD_REDIRECT_URI: ${{ vars.DISCORD_REDIRECT_URI }}
-        run: python renew.py
+        # 把脚本退出码翻译成 Actions 注解，失败原因一眼可见（不用点进日志）
+        # 注意：退出码原样透传，失败时让 job 正常标红，不要吞掉
+        run: |
+          set -uo pipefail
+          python renew.py
+          code=$?
+          case "$code" in
+            0) echo "::notice::续期流程正常结束" ;;
+            1) echo "::error::未配置 SLIME_SESSION 和 DISCORD_TOKEN，至少填一个" ;;
+            2) echo "::error::Session 已过期且未配置 DISCORD_TOKEN，请补上 Discord Token" ;;
+            3) echo "::error::无法获取余额（网络或面板问题）" ;;
+            4) echo "::error::Discord 关联登录失败：DISCORD_TOKEN 可能已失效" ;;
+            *) echo "::error::未知退出码 $code" ;;
+          esac
+          exit $code
 
   # 本次运行结束后清理本工作流的历史运行记录，只保留最新一份（当前这次）
   cleanup-runs:
     needs: renew-server
-    if: always()
-    runs-on: ubuntu-latest
+    # 只在 renew-server 真正执行过时清理（成功或失败都清）。
+    # 排除 cancelled：runner 分配失败会让 job 变 cancelled、
+    # 一个步骤都没跑，此时再排队 15 分钟纯属浪费配额。
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
     # 清理失败不影响续期结果
     continue-on-error: true
     steps:
